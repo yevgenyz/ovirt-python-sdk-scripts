@@ -1,8 +1,8 @@
 #! /usr/bin/python
 import getopt
 import getpass
-import sys
 import os
+import sys
 
 from ovirtsdk.api import API
 
@@ -60,13 +60,13 @@ def is_mac_in_pool(mac, mac_ranges):
     return False
 
 
-def has_vm_external_mac(vm, mac_pool_ranges):
-    vnics = vm.get_nics().list()
+def has_vm_external_mac(vm, mac_pool_ranges, vnics_loader):
+    vnics = vnics_loader(vm)
     for vnic in vnics:
         mac_address = vnic.mac.address
         if mac_address:
             if not is_mac_in_pool(mac_address, mac_pool_ranges):
-                print('VM=%s \tvnic=%s\tmac=%s' % (vm.name, vnic.name, mac_address))
+                print('WARN: MAC out of range - VM=%s\tvNIC=%s\tMAC=%s' % (vm.name, vnic.name, mac_address))
                 return True
         else:
             print('WARN: VM=%s \tvnic=%s: vNIC has no MAC address' % (vm.name, vnic.name))
@@ -75,13 +75,17 @@ def has_vm_external_mac(vm, mac_pool_ranges):
 
 def iter_problematic_vms(api):
     data_centers = api.datacenters.list()
+
+    def vnics_loader(_vm):
+        return vm.get_nics().list()
+
     for dc in data_centers:
         mac_pool = api.macpools.get(id=dc.mac_pool.id)
         mac_pool_ranges = mac_pool2ranges(mac_pool)
 
         vms = api.vms.list(query='datacenter=\"%s\"' % dc.name)
         for vm in vms:
-            if has_vm_external_mac(vm, mac_pool_ranges):
+            if has_vm_external_mac(vm, mac_pool_ranges, vnics_loader):
                 yield vm
 
 
@@ -107,10 +111,13 @@ def process(api_url, username, password, cert_file=None):
 
     problematic_vms = list(iter_problematic_vms(api))
 
-    print(build_search_criteria(problematic_vms, get_single_vm_criteria_by_name))
-    print(build_search_criteria(problematic_vms, get_single_vm_criteria_by_id))
-
     api.disconnect()
+
+    if problematic_vms:
+        print(build_search_criteria(problematic_vms, get_single_vm_criteria_by_name))
+        print(build_search_criteria(problematic_vms, get_single_vm_criteria_by_id))
+    else:
+        print('All MAC addresses are in range')
 
 
 def get_password():
